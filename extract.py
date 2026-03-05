@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""Salesforce SOQL Data Extractor — main entry point."""
+
+import argparse
+import logging
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+from src.auth import connect
+from src.config import load_config
+from src.extractor import ExtractionSummary, extract_object
+from src.state import ExtractionState
+from src.writer import write_csv
+
+LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
+
+
+def setup_logging(log_file: str = "extraction.log"):
+    """Configure logging to console (INFO) and file (DEBUG)."""
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+
+    console = logging.StreamHandler(sys.stdout)
+    console.setLevel(logging.INFO)
+    console.setFormatter(logging.Formatter(LOG_FORMAT))
+    root.addHandler(console)
+
+    fh = logging.FileHandler(log_file, encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter(LOG_FORMAT))
+    root.addHandler(fh)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Extract Salesforce data via SOQL")
+    parser.add_argument(
+        "-c", "--config",
+        default="config.yaml",
+        help="Path to config YAML file (default: config.yaml)",
+    )
+    parser.add_argument(
+        "-m", "--mode",
+        choices=["full", "incremental"],
+        default=None,
+        help="Override extraction mode from config",
+    )
+    parser.add_argument(
+        "-l", "--limit",
+        type=int,
+        default=None,
+        help="Limit number of records per object (SOQL LIMIT clause)",
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    setup_logging()
+    logger = logging.getLogger(__name__)
+
+    total_start = time.time()
+    logger.info("=== Salesforce Data Extraction Started ===")
+
+    # Load config
+    try:
+        config = load_config(args.config)
+    except (FileNotFoundError, ValueError) as e:
+        logger.error("Config error: %s", e)
+        sys.exit(1)
+
+    # Allow CLI override of mode
+    mode = args.mode or config.mode
+    limit = args.limit
+    logger.info("Mode: %s | Objects: %d | Output: %s", mode, len(config.objects), config.output_dir)
+    if limit:
+        logger.info("Record limit per object: %d", limit)
+
+    # Authenticate
+    try:
+        sf = connect(config.org_alias)
+    except RuntimeError as e:
+        logger.error("Authentication failed: %s", e)
+        sys.exit(1)
+
+    # Prepare output directory with timestamp
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H-%M-%S")
+    run_output_dir = config.output_dir / timestamp
+
+    # Load state for incremental mode
+    state = ExtractionState(Path(".")) if mode == "incremental" else None
+
+    # Extract each object
+    summary = ExtractionSummary()
+
+    for obj_config in config.objects:
+        logger.info("--- Extracting: %s ---", obj_config.name)
+
+        incremental_since = None
+        if state:
+            incremental_since = state.get_last_run(obj_config.name)
+            if incremental_since:
+                logger.info("Incremental since: %s", incremental_since)
+            else:
+                logger.info("No previous state, doing full extract for %s", obj_config.name)
+
+        result, records = extract_object(sf, obj_config, incremental_since, limit=limit)
+        summary.results.append(result)
+
+        if result.success and records:
+            write_csv(records, obj_config.name, run_output_dir)
+            if state:
+                state.update(obj_config.name)
+        elif result.success and not records:
+            logger.info("No records returned for %s", obj_config.name)
+
+    # Print summary
+    total_duration = time.time() - total_start
+    logger.info("=== Extraction Complete ===")
+    logger.info("Duration: %.1fs", total_duration)
+    logger.info("Succeeded: %d | Failed: %d", len(summary.succeeded), len(summary.failed))
+
+    for r in summary.succeeded:
+        logger.info("  OK  %s: %d records (%s API, %.1fs)", r.object_name, r.record_count, r.api_used, r.duration_seconds)
+
+    for r in summary.failed:
+        logger.error("  FAIL %s: %s", r.object_name, r.error)
+
+    if summary.failed:
+        logger.warning("Some objects failed. Check logs for details.")
+        sys.exit(2)
+
+
+if __name__ == "__main__":
+    main()

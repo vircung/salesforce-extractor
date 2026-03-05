@@ -1,0 +1,57 @@
+[tools]
+python = "3.14"
+node = "22"
+"npm:@salesforce/cli" = "latest"
+
+[tasks.auth]
+description = "Login to Salesforce org (or verify existing session)"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+
+ORG_ALIAS=$(python -c "from src.config import load_config; print(load_config('config.yaml').org_alias)")
+
+echo "Checking auth for org: $ORG_ALIAS"
+if sf org display --target-org "$ORG_ALIAS" --json 2>/dev/null | python -c "
+import sys, json
+data = json.load(sys.stdin)
+r = data.get('result', {})
+if r.get('accessToken') and r.get('instanceUrl'):
+    print(f'Authenticated to {r[\"instanceUrl\"]} as {r.get(\"username\", \"unknown\")}')
+else:
+    sys.exit(1)
+"; then
+    echo "Session is valid."
+else
+    echo "No valid session. Opening browser login..."
+    sf org login web --alias "$ORG_ALIAS"
+fi
+"""
+
+[tasks.execute]
+description = "Full extraction of all configured objects"
+run = "python extract.py --mode full"
+
+[tasks.verify]
+description = "Test extraction with limited records per object"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+LIMIT=$(python -c "from src.config import load_config; print(load_config('config.yaml').verify_limit)")
+echo "Verify mode: extracting up to $LIMIT records per object"
+python extract.py --mode full --limit "$LIMIT"
+"""
+
+[tasks.setup]
+description = "Install dependencies and prepare config"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+pip install -r requirements.txt
+if [ ! -f config.yaml ]; then
+    cp config-example.yaml config.yaml
+    echo "Created config.yaml from config-example.yaml — edit it with your settings."
+else
+    echo "config.yaml already exists, skipping."
+fi
+"""

@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Output
+output/
+extraction.log
+state.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Node (sf cli)
+node_modules/
+
+# Config (use config-example.yaml as template)
+config.yaml
+
+# Environment
+.env
+.env.local

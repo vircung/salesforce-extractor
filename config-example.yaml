@@ -1,0 +1,55 @@
+# Salesforce Data Extraction Configuration
+#
+# Usage:
+#   1. Login:  sf org login web --alias my-org
+#   2. Run:    python extract.py
+#   3. Override mode: python extract.py --mode incremental
+
+# Salesforce org alias (from sf org login web --alias <alias>)
+org_alias: "my-org"
+
+# Output directory — CSV files will be saved to output/<timestamp>/
+output_dir: "./output"
+
+# Mode: "full" (all records) | "incremental" (since last run)
+mode: "full"
+
+# Record limit per object for "verify" task (mise run verify)
+verify_limit: 10
+
+# Objects to extract
+# - name: Salesforce API name of the object
+# - fields: optional field list; omit to fetch all fields
+objects:
+  - name: Account
+    fields:
+      - Id
+      - Name
+      - Industry
+      - BillingCity
+      - BillingCountry
+      - CreatedDate
+      - LastModifiedDate
+
+  - name: Contact
+    fields:
+      - Id
+      - FirstName
+      - LastName
+      - Email
+      - Phone
+      - AccountId
+      - LastModifiedDate
+
+  - name: Opportunity
+    fields:
+      - Id
+      - Name
+      - StageName
+      - Amount
+      - CloseDate
+      - AccountId
+      - LastModifiedDate
+
+  # Example custom object — no field list specified (will fetch all fields)
+  # - name: Custom_Object__c
