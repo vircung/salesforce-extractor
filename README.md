@@ -2,38 +2,34 @@
 
 Extract Salesforce data via SOQL with automatic Bulk API 2.0 / REST API selection.
 
-## Installation
-
-```bash
-pip install -r requirements.txt
-```
-
 ## Setup
 
-1. Login to Salesforce:
+1. Install dependencies:
    ```bash
-   sf org login web --alias my-org
+   mise run setup
    ```
 
 2. Configure `config.yaml`:
-   - Set `org_alias` to your alias from step 1
+   - Set `org_alias` to your Salesforce org alias
    - Add objects to extract in the `objects` section
    - Choose mode: `full` or `incremental`
+
+3. Authenticate to Salesforce:
+   ```bash
+   mise run auth
+   ```
 
 ## Usage
 
 ```bash
-# Basic run
-python extract.py
+# Test extraction (limited records per object)
+mise run verify
 
-# Custom config
-python extract.py --config my-config.yaml
+# Full extraction of all configured objects
+mise run execute
 
-# Override mode
-python extract.py --mode incremental
-
-# Limit records (for testing)
-python extract.py --limit 10
+# Advanced: Direct Python invocation
+python extract.py --config my-config.yaml --mode incremental --limit 10
 ```
 
 ## Modes
