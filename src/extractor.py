@@ -41,14 +41,22 @@ class ExtractionSummary:
 
 
 def _resolve_fields(sf: Salesforce, obj_config: ObjectConfig) -> list[str]:
-    """Get field list: use configured fields or discover all via describe()."""
-    if obj_config.fields:
-        return obj_config.fields
+    """Get field list: use configured fields or discover all via describe().
 
-    logger.info("No fields specified for %s, discovering via describe()", obj_config.name)
-    desc = getattr(sf, obj_config.name).describe()
-    fields = [f["name"] for f in desc["fields"]]
-    logger.info("Discovered %d fields for %s", len(fields), obj_config.name)
+    Appends include fields (relationship fields) and deduplicates.
+    """
+    if obj_config.fields:
+        fields = list(obj_config.fields)
+    else:
+        logger.info("No fields specified for %s, discovering via describe()", obj_config.name)
+        desc = getattr(sf, obj_config.name).describe()
+        fields = [f["name"] for f in desc["fields"]]
+        logger.info("Discovered %d fields for %s", len(fields), obj_config.name)
+
+    if obj_config.include:
+        fields = list(dict.fromkeys(fields + obj_config.include))
+        logger.info("Added %d include fields for %s", len(obj_config.include), obj_config.name)
+
     return fields
 
 
@@ -98,6 +106,69 @@ def _extract_rest(sf: Salesforce, soql: str) -> list[dict]:
     return records
 
 
+def _flatten_records(records: list[dict], relationship_fields: list[str]) -> list[dict]:
+    """Flatten nested dicts from REST API to dot-notation keys.
+
+    Bulk API records are already flat — detected and skipped.
+    Null relationships are expanded to individual null values using
+    the known relationship_fields list.
+    """
+    if not relationship_fields or not records:
+        return records
+
+    # Build prefix map: {"CreatedBy": ["CreatedBy.Name", "CreatedBy.Email"]}
+    prefix_map: dict[str, list[str]] = {}
+    for rf in relationship_fields:
+        prefix = rf.split(".")[0]
+        prefix_map.setdefault(prefix, []).append(rf)
+
+    flattened = []
+    for record in records:
+        # Check if any value is a dict — if not, record is already flat
+        has_nested = any(isinstance(v, dict) for v in record.values())
+        if not has_nested:
+            flattened.append(record)
+            continue
+
+        flat = {}
+        for key, value in record.items():
+            if key == "attributes":
+                continue
+
+            if key in prefix_map and isinstance(value, dict):
+                # Flatten nested dict, extracting only listed fields
+                _flatten_nested(flat, key, value, prefix_map[key])
+            elif key in prefix_map and value is None:
+                # Null relationship — expand to individual null values
+                for rf in prefix_map[key]:
+                    flat[rf] = None
+            else:
+                flat[key] = value
+
+        flattened.append(flat)
+
+    return flattened
+
+
+def _flatten_nested(
+    flat: dict, prefix: str, nested: dict, expected_fields: list[str],
+) -> None:
+    """Recursively flatten a nested dict, stripping 'attributes' keys."""
+    for key, value in nested.items():
+        if key == "attributes":
+            continue
+        dotted = f"{prefix}.{key}"
+        if isinstance(value, dict):
+            # Deeper nesting — recurse with sub-fields
+            sub_fields = [f for f in expected_fields if f.startswith(dotted + ".")]
+            if sub_fields:
+                _flatten_nested(flat, dotted, value, sub_fields)
+            else:
+                flat[dotted] = value
+        else:
+            flat[dotted] = value
+
+
 def extract_object(
     sf: Salesforce,
     obj_config: ObjectConfig,
@@ -144,6 +215,11 @@ def extract_object(
                 )
                 records = _extract_rest(sf, soql)
                 result.api_used = "rest"
+
+        # Flatten nested dicts from REST API (no-op for Bulk API flat records)
+        relationship_fields = [f for f in fields if '.' in f]
+        if relationship_fields:
+            records = _flatten_records(records, relationship_fields)
 
         result.record_count = len(records)
         result.duration_seconds = time.time() - start

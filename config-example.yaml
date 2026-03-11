@@ -20,6 +20,7 @@ verify_limit: 10
 # Objects to extract
 # - name: Salesforce API name of the object
 # - fields: optional field list; omit to fetch all fields
+# - include: optional relationship fields (dot notation, e.g. CreatedBy.Name)
 objects:
   - name: Account
     fields:
@@ -30,6 +31,9 @@ objects:
       - BillingCountry
       - CreatedDate
       - LastModifiedDate
+    include:
+      - CreatedBy.Name
+      - LastModifiedBy.Name
 
   - name: Contact
     fields:

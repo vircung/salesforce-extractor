@@ -10,6 +10,7 @@ import yaml
 class ObjectConfig:
     name: str
     fields: list[str] = field(default_factory=list)
+    include: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -47,6 +48,7 @@ def load_config(path: str | Path) -> Config:
             objects.append(ObjectConfig(
                 name=obj["name"],
                 fields=obj.get("fields", []),
+                include=obj.get("include", []),
             ))
         else:
             raise ValueError(f"Invalid object entry: {obj}")
