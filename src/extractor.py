@@ -169,6 +169,140 @@ def _flatten_nested(
             flat[dotted] = value
 
 
+# Field types that cannot be used in SOQL queries
+_NON_QUERYABLE_TYPES = {"address", "location"}
+
+# Relationship fields to resolve actor IDs to names
+_PI_RELATIONSHIP_FIELDS = [
+    "SubmittedBy.Name", "LastActor.Name", "CreatedBy.Name", "LastModifiedBy.Name",
+]
+_NODE_RELATIONSHIP_FIELDS = [
+    "LastActor.Name", "CreatedBy.Name", "LastModifiedBy.Name",
+]
+
+
+def _discover_queryable_fields(sf: Salesforce, object_name: str) -> list[str]:
+    """Discover all queryable fields for an object via describe(), filtering compound types."""
+    desc = getattr(sf, object_name).describe()
+    return [f["name"] for f in desc["fields"] if f["type"] not in _NON_QUERYABLE_TYPES]
+
+
+def _flatten_pi_record(
+    record: dict,
+    pi_field_names: list[str],
+    node_field_names: list[str],
+) -> list[dict]:
+    """Denormalize a ProcessInstance record with nested Nodes into flat rows.
+
+    Each Node becomes one row with PI_ and Node_ prefixed columns.
+    Instances without nodes produce one row with empty Node_ columns.
+    """
+    # Extract PI-level fields, flattening relationship dicts (SubmittedBy, LastActor)
+    pi_data = {}
+    for key, value in record.items():
+        if key in ("attributes", "Nodes"):
+            continue
+        if isinstance(value, dict):
+            # Relationship field — extract Name, skip attributes
+            for sub_key, sub_value in value.items():
+                if sub_key == "attributes":
+                    continue
+                pi_data[f"PI_{key}.{sub_key}"] = sub_value
+        else:
+            pi_data[f"PI_{key}"] = value
+
+    # Extract Nodes
+    nodes_data = record.get("Nodes")
+    if nodes_data is None or not nodes_data.get("records"):
+        # No nodes — one row with empty Node_ columns
+        row = dict(pi_data)
+        for nf in node_field_names:
+            row[f"Node_{nf}"] = None
+        return [row]
+
+    # Warn if child subquery was truncated
+    if not nodes_data.get("done", True):
+        logger.warning(
+            "Nodes subquery truncated for ProcessInstance %s — some nodes may be missing",
+            record.get("Id", "unknown"),
+        )
+
+    rows = []
+    for node in nodes_data["records"]:
+        row = dict(pi_data)
+        for key, value in node.items():
+            if key == "attributes":
+                continue
+            if isinstance(value, dict):
+                for sub_key, sub_value in value.items():
+                    if sub_key == "attributes":
+                        continue
+                    row[f"Node_{key}.{sub_key}"] = sub_value
+            else:
+                row[f"Node_{key}"] = value
+        rows.append(row)
+
+    return rows
+
+
+def extract_approval_history(
+    sf: Salesforce,
+    obj_config: ObjectConfig,
+    limit: int | None = None,
+) -> tuple[ExtractionResult, list[dict]]:
+    """Extract approval history for an object as denormalized records.
+
+    Queries ProcessInstance with Nodes child subquery via REST API.
+    Returns one row per approval step (Node), with ProcessInstance
+    fields repeated. Instances without nodes get one row with empty
+    Node columns.
+    """
+    result_name = f"ApprovalHistory_{obj_config.name}"
+    result = ExtractionResult(object_name=result_name)
+    start = time.time()
+
+    try:
+        # Discover fields
+        pi_fields = _discover_queryable_fields(sf, "ProcessInstance")
+        node_fields = _discover_queryable_fields(sf, "ProcessInstanceNode")
+
+        # Add relationship fields for actor name resolution
+        pi_select = list(dict.fromkeys(pi_fields + _PI_RELATIONSHIP_FIELDS))
+        node_select = list(dict.fromkeys(node_fields + _NODE_RELATIONSHIP_FIELDS))
+
+        # Build SOQL with child subquery
+        node_subquery = f"(SELECT {', '.join(node_select)} FROM Nodes ORDER BY CreatedDate)"
+        pi_field_list = ", ".join(pi_select)
+        where = f"WHERE TargetObjectId IN (SELECT Id FROM {obj_config.name})"
+
+        soql = f"SELECT {pi_field_list}, {node_subquery} FROM ProcessInstance {where}"
+        if limit:
+            soql += f" LIMIT {limit}"
+
+        logger.info("Approval history SOQL: %s", soql)
+
+        # Execute via REST API (subqueries not supported by Bulk API)
+        records = []
+        for record in sf.query_all_iter(soql):
+            records.extend(_flatten_pi_record(record, pi_select, node_select))
+
+        result.api_used = "rest"
+        result.record_count = len(records)
+        result.duration_seconds = time.time() - start
+
+        logger.info(
+            "Extracted %d approval history rows for %s in %.1fs",
+            result.record_count, obj_config.name, result.duration_seconds,
+        )
+        return result, records
+
+    except Exception as e:
+        result.error = str(e)
+        result.duration_seconds = time.time() - start
+        logger.error("Failed to extract approval history for %s: %s", obj_config.name, e)
+        return result, []
+
+
 def extract_object(
     sf: Salesforce,
     obj_config: ObjectConfig,

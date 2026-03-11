@@ -11,6 +11,7 @@ class ObjectConfig:
     name: str
     fields: list[str] = field(default_factory=list)
     include: list[str] = field(default_factory=list)
+    approval_history: bool = False
 
 
 @dataclass
@@ -49,6 +50,7 @@ def load_config(path: str | Path) -> Config:
                 name=obj["name"],
                 fields=obj.get("fields", []),
                 include=obj.get("include", []),
+                approval_history=obj.get("approval_history", False),
             ))
         else:
             raise ValueError(f"Invalid object entry: {obj}")

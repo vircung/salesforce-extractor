@@ -10,7 +10,7 @@ from pathlib import Path
 
 from src.auth import connect
 from src.config import load_config
-from src.extractor import ExtractionSummary, extract_object
+from src.extractor import ExtractionSummary, extract_approval_history, extract_object
 from src.state import ExtractionState
 from src.writer import write_csv
 
@@ -112,6 +112,20 @@ def main():
             write_csv(records, obj_config.name, run_output_dir)
             if state:
                 state.update(obj_config.name)
+
+            # Extract approval history if configured (error-isolated)
+            if obj_config.approval_history:
+                try:
+                    logger.info("--- Extracting approval history for: %s ---", obj_config.name)
+                    ah_result, ah_records = extract_approval_history(sf, obj_config, limit=limit)
+                    summary.results.append(ah_result)
+                    if ah_result.success and ah_records:
+                        write_csv(ah_records, f"ApprovalHistory_{obj_config.name}", run_output_dir)
+                    elif ah_result.success and not ah_records:
+                        logger.info("No approval history found for %s", obj_config.name)
+                except Exception as e:
+                    logger.error("Approval history extraction failed for %s: %s", obj_config.name, e)
+
         elif result.success and not records:
             logger.info("No records returned for %s", obj_config.name)
 
