@@ -72,11 +72,18 @@ objects:
 
 ## Output
 
+CSV files are written directly to the configured `output_dir`:
 ```
-output/<timestamp>/
+output/
   Account.csv
   Contact.csv
   Opportunity.csv
+```
+
+If the output directory already contains CSV files, an interactive prompt asks for confirmation before overwriting. In non-interactive contexts (CI, piped stdin), overwriting proceeds automatically.
+
+Other files:
+```
 state.json                # incremental mode timestamps (per object)
 extraction.log            # full debug log
 ```
@@ -112,6 +119,6 @@ sf-extractor/
 │   ├── extractor.py     # Bulk API 2.0 / REST API extraction with fallback
 │   ├── state.py         # Incremental state tracking (state.json)
 │   └── writer.py        # CSV writer (removes SF attributes key)
-├── output/              # Timestamped extraction output (gitignored)
+├── output/              # Extraction output (gitignored)
 └── extraction.log       # Debug log (gitignored)
 ```

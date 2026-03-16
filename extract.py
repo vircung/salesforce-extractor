@@ -5,7 +5,6 @@ import argparse
 import logging
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 from src.auth import connect
@@ -84,9 +83,25 @@ def main():
         logger.error("Authentication failed: %s", e)
         sys.exit(1)
 
-    # Prepare output directory with timestamp
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H-%M-%S")
-    run_output_dir = config.output_dir / timestamp
+    # Prepare output directory
+    run_output_dir = config.output_dir
+
+    # Check for existing CSV files and prompt before overwriting
+    existing_csvs = sorted(run_output_dir.glob("*.csv")) if run_output_dir.exists() else []
+    if existing_csvs:
+        if sys.stdin.isatty():
+            logger.info("Existing CSV files in %s:", run_output_dir)
+            for csv_file in existing_csvs:
+                logger.info("  %s", csv_file.name)
+            try:
+                answer = input("Overwrite? [y/N]: ").strip().lower()
+            except EOFError:
+                answer = ""
+            if answer not in ("y", "yes"):
+                logger.info("Aborted by user.")
+                sys.exit(0)
+        else:
+            logger.warning("Existing CSV files in %s will be overwritten (non-interactive mode).", run_output_dir)
 
     # Load state for incremental mode
     state = ExtractionState(Path(".")) if mode == "incremental" else None

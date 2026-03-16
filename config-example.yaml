@@ -8,7 +8,7 @@
 # Salesforce org alias (from sf org login web --alias <alias>)
 org_alias: "my-org"
 
-# Output directory — CSV files will be saved to output/<timestamp>/
+# Output directory — CSV files are written directly to this path.
 output_dir: "./output"
 
 # Mode: "full" (all records) | "incremental" (since last run)
