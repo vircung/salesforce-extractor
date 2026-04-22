@@ -8,6 +8,8 @@ output/
 extraction.log
 state.json
 
+superpowers/
+
 # IDE
 .vscode/
 .idea/
