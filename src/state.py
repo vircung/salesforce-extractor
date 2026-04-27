@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -20,10 +21,13 @@ class ExtractionState:
 
     def _load(self):
         if self.path.exists():
-            with open(self.path) as f:
-                data = json.load(f)
-            self.last_run = data.get("last_run", {})
-            logger.info("Loaded state from %s (%d objects)", self.path, len(self.last_run))
+            try:
+                with open(self.path) as f:
+                    data = json.load(f)
+                self.last_run = data.get("last_run", {})
+                logger.info("Loaded state from %s (%d objects)", self.path, len(self.last_run))
+            except json.JSONDecodeError:
+                logger.warning("Corrupted state file %s, starting fresh", self.path)
         else:
             logger.info("No state file found at %s, starting fresh", self.path)
 
@@ -40,6 +44,8 @@ class ExtractionState:
 
     def _save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.path, "w") as f:
+        tmp_path = self.path.with_name(self.path.name + ".tmp")
+        with open(tmp_path, "w") as f:
             json.dump({"last_run": self.last_run}, f, indent=2)
+        os.replace(tmp_path, self.path)
         logger.debug("State saved to %s", self.path)
