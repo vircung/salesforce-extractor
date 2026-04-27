@@ -41,7 +41,13 @@ def get_sf_credentials(org_alias: str) -> SfCredentials:
             f"stderr: {stderr}"
         )
 
-    data = json.loads(result.stdout)
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"Failed to parse sf org display output: {e}\n"
+            f"Raw output: {result.stdout[:200]}"
+        )
     sf_result = data.get("result", {})
 
     access_token = sf_result.get("accessToken")
