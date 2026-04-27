@@ -5,6 +5,7 @@ import argparse
 import logging
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src.auth import connect
@@ -108,6 +109,7 @@ def main():
 
     # Extract each object
     summary = ExtractionSummary()
+    run_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000+0000")
 
     for obj_config in config.objects:
         logger.info("--- Extracting: %s ---", obj_config.name)
@@ -126,7 +128,7 @@ def main():
         if result.success and records:
             write_csv(records, obj_config.name, run_output_dir)
             if state:
-                state.update(obj_config.name)
+                state.update(obj_config.name, timestamp=run_timestamp)
 
             # Extract approval history if configured (error-isolated)
             if obj_config.approval_history:
