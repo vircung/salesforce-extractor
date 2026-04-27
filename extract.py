@@ -15,10 +15,16 @@ from src.state import ExtractionState
 from src.writer import write_csv
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
+_logging_configured = False
 
 
 def setup_logging(log_file: str = "extraction.log"):
     """Configure logging to console (INFO) and file (DEBUG)."""
+    global _logging_configured
+    if _logging_configured:
+        return
+    _logging_configured = True
+
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
 

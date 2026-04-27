@@ -29,6 +29,8 @@ class Config:
     verify_limit: int = 10  # record limit used by the "verify" task
 
     def __post_init__(self):
+        if not self.org_alias:
+            raise ValueError("org_alias is required")
         if not isinstance(self.mode, ExtractionMode):
             self.mode = ExtractionMode(self.mode)
         if not self.objects:
