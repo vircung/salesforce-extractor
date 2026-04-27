@@ -127,11 +127,11 @@ def _flatten_dict(data: dict, prefix: str) -> dict:
 
 
 def _flatten_records(records: list[dict], relationship_fields: list[str]) -> list[dict]:
-    """Flatten nested dicts from REST API to dot-notation keys.
+    """Flatten nested dicts to dot-notation keys using schema-level check.
 
-    Bulk API records are already flat — detected and skipped.
-    Null relationships are expanded to individual null values using
-    the known relationship_fields list.
+    All records in a batch are flattened unconditionally when relationship
+    fields are present. Null relationships are expanded to individual null
+    values using the known relationship_fields list.
     """
     if not relationship_fields or not records:
         return records
