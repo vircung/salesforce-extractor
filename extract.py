@@ -105,7 +105,16 @@ def main():
             logger.warning("Existing CSV files in %s will be overwritten (non-interactive mode).", run_output_dir)
 
     # Load state for incremental mode
-    state = ExtractionState(Path(".")) if mode == "incremental" else None
+    state = None
+    if mode == "incremental":
+        state_dir = Path(args.config).resolve().parent
+        if state_dir != Path.cwd() and Path("state.json").exists():
+            logger.warning(
+                "Found state.json in CWD (%s) but state directory is now %s. "
+                "Consider moving state.json to preserve incremental timestamps.",
+                Path.cwd(), state_dir,
+            )
+        state = ExtractionState(state_dir)
 
     # Extract each object
     summary = ExtractionSummary()
