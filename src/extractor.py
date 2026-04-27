@@ -352,7 +352,7 @@ def extract_object(
             try:
                 records = _extract_bulk(sf, obj_config.name, soql)
                 result.api_used = "bulk"
-            except (SalesforceError, Exception) as bulk_err:
+            except SalesforceError as bulk_err:
                 logger.warning(
                     "Bulk API failed for %s: %s. Falling back to REST API.",
                     obj_config.name, bulk_err,
