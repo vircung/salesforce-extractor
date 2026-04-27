@@ -1,9 +1,15 @@
 """Parse and validate config.yaml for Salesforce extraction."""
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 
 import yaml
+
+
+class ExtractionMode(StrEnum):
+    FULL = "full"
+    INCREMENTAL = "incremental"
 
 
 @dataclass
@@ -18,13 +24,13 @@ class ObjectConfig:
 class Config:
     org_alias: str
     output_dir: Path
-    mode: str  # "full" | "incremental"
+    mode: ExtractionMode
     objects: list[ObjectConfig]
     verify_limit: int = 10  # record limit used by the "verify" task
 
     def __post_init__(self):
-        if self.mode not in ("full", "incremental"):
-            raise ValueError(f"Invalid mode '{self.mode}', must be 'full' or 'incremental'")
+        if not isinstance(self.mode, ExtractionMode):
+            self.mode = ExtractionMode(self.mode)
         if not self.objects:
             raise ValueError("No objects defined in config")
 

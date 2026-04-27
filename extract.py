@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.auth import connect
-from src.config import load_config
+from src.config import ExtractionMode, load_config
 from src.extractor import ExtractionSummary, extract_approval_history, extract_object
 from src.state import ExtractionState
 from src.writer import write_csv
@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "-m", "--mode",
-        choices=["full", "incremental"],
+        choices=[e.value for e in ExtractionMode],
         default=None,
         help="Override extraction mode from config",
     )
@@ -71,7 +71,7 @@ def main():
         sys.exit(1)
 
     # Allow CLI override of mode
-    mode = args.mode or config.mode
+    mode = ExtractionMode(args.mode) if args.mode else config.mode
     limit = args.limit
     logger.info("Mode: %s | Objects: %d | Output: %s", mode, len(config.objects), config.output_dir)
     if limit:
