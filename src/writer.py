@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 def write_csv(records: list[dict], object_name: str, output_dir: Path) -> Path:
     """Write a list of record dicts to a CSV file.
 
-    Removes the Salesforce 'attributes' metadata key from each record.
-    Returns the path to the written file.
+    Uses the union of all record keys as fieldnames to ensure
+    consistent columns. Returns the path to the written file.
     """
     if not records:
         logger.warning("No records to write for %s", object_name)

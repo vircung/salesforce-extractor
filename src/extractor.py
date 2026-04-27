@@ -250,6 +250,7 @@ def _flatten_pi_record(
         )
 
     rows = []
+    _strip_attributes(nodes_data["records"])
     for node in nodes_data["records"]:
         row = dict(pi_data)
         for key, value in node.items():
