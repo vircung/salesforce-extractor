@@ -106,6 +106,26 @@ def _extract_rest(sf: Salesforce, soql: str) -> list[dict]:
     return records
 
 
+def _strip_attributes(records: list[dict]) -> None:
+    """Remove top-level 'attributes' key from each record in place."""
+    for record in records:
+        record.pop("attributes", None)
+
+
+def _flatten_dict(data: dict, prefix: str) -> dict:
+    """Recursively flatten a nested dict to dot-notation keys, skipping 'attributes'."""
+    result = {}
+    for key, value in data.items():
+        if key == "attributes":
+            continue
+        dotted = f"{prefix}.{key}"
+        if isinstance(value, dict):
+            result.update(_flatten_dict(value, dotted))
+        else:
+            result[dotted] = value
+    return result
+
+
 def _flatten_records(records: list[dict], relationship_fields: list[str]) -> list[dict]:
     """Flatten nested dicts from REST API to dot-notation keys.
 
@@ -124,49 +144,21 @@ def _flatten_records(records: list[dict], relationship_fields: list[str]) -> lis
 
     flattened = []
     for record in records:
-        # Check if any value is a dict — if not, record is already flat
-        has_nested = any(isinstance(v, dict) for v in record.values())
-        if not has_nested:
-            flattened.append(record)
-            continue
-
         flat = {}
         for key, value in record.items():
-            if key == "attributes":
-                continue
-
             if key in prefix_map and isinstance(value, dict):
-                # Flatten nested dict, extracting only listed fields
-                _flatten_nested(flat, key, value, prefix_map[key])
+                flat.update(_flatten_dict(value, key))
             elif key in prefix_map and value is None:
-                # Null relationship — expand to individual null values
                 for rf in prefix_map[key]:
                     flat[rf] = None
+            elif isinstance(value, dict):
+                flat.update(_flatten_dict(value, key))
             else:
                 flat[key] = value
 
         flattened.append(flat)
 
     return flattened
-
-
-def _flatten_nested(
-    flat: dict, prefix: str, nested: dict, expected_fields: list[str],
-) -> None:
-    """Recursively flatten a nested dict, stripping 'attributes' keys."""
-    for key, value in nested.items():
-        if key == "attributes":
-            continue
-        dotted = f"{prefix}.{key}"
-        if isinstance(value, dict):
-            # Deeper nesting — recurse with sub-fields
-            sub_fields = [f for f in expected_fields if f.startswith(dotted + ".")]
-            if sub_fields:
-                _flatten_nested(flat, dotted, value, sub_fields)
-            else:
-                flat[dotted] = value
-        else:
-            flat[dotted] = value
 
 
 # Field types that cannot be used in SOQL queries
@@ -197,30 +189,45 @@ def _flatten_pi_record(
     Each Node becomes one row with PI_ and Node_ prefixed columns.
     Instances without nodes produce one row with empty Node_ columns.
     """
-    # Extract PI-level fields, flattening relationship dicts (SubmittedBy, LastActor)
+    # Build prefix maps for relationship fields
+    pi_prefix_map: dict[str, list[str]] = {}
+    for rf in _PI_RELATIONSHIP_FIELDS:
+        prefix = rf.split(".")[0]
+        pi_prefix_map.setdefault(prefix, []).append(rf)
+
+    node_prefix_map: dict[str, list[str]] = {}
+    for rf in _NODE_RELATIONSHIP_FIELDS:
+        prefix = rf.split(".")[0]
+        node_prefix_map.setdefault(prefix, []).append(rf)
+
+    # Extract PI-level fields
     pi_data = {}
     for key, value in record.items():
-        if key in ("attributes", "Nodes"):
+        if key == "Nodes":
             continue
-        if isinstance(value, dict):
-            # Relationship field — extract Name, skip attributes
-            for sub_key, sub_value in value.items():
-                if sub_key == "attributes":
-                    continue
-                pi_data[f"PI_{key}.{sub_key}"] = sub_value
+        if key in pi_prefix_map and isinstance(value, dict):
+            for k, v in _flatten_dict(value, key).items():
+                pi_data[f"PI_{k}"] = v
+        elif key in pi_prefix_map and value is None:
+            for rf in pi_prefix_map[key]:
+                pi_data[f"PI_{rf}"] = None
+        elif isinstance(value, dict):
+            for k, v in _flatten_dict(value, key).items():
+                pi_data[f"PI_{k}"] = v
         else:
             pi_data[f"PI_{key}"] = value
 
     # Extract Nodes
     nodes_data = record.get("Nodes")
     if nodes_data is None or not nodes_data.get("records"):
-        # No nodes — one row with empty Node_ columns
         row = dict(pi_data)
+        for rf in _NODE_RELATIONSHIP_FIELDS:
+            row[f"Node_{rf}"] = None
         for nf in node_field_names:
-            row[f"Node_{nf}"] = None
+            if "." not in nf:
+                row.setdefault(f"Node_{nf}", None)
         return [row]
 
-    # Warn if child subquery was truncated
     if not nodes_data.get("done", True):
         logger.warning(
             "Nodes subquery truncated for ProcessInstance %s — some nodes may be missing",
@@ -231,13 +238,15 @@ def _flatten_pi_record(
     for node in nodes_data["records"]:
         row = dict(pi_data)
         for key, value in node.items():
-            if key == "attributes":
-                continue
-            if isinstance(value, dict):
-                for sub_key, sub_value in value.items():
-                    if sub_key == "attributes":
-                        continue
-                    row[f"Node_{key}.{sub_key}"] = sub_value
+            if key in node_prefix_map and isinstance(value, dict):
+                for k, v in _flatten_dict(value, key).items():
+                    row[f"Node_{k}"] = v
+            elif key in node_prefix_map and value is None:
+                for rf in node_prefix_map[key]:
+                    row[f"Node_{rf}"] = None
+            elif isinstance(value, dict):
+                for k, v in _flatten_dict(value, key).items():
+                    row[f"Node_{k}"] = v
             else:
                 row[f"Node_{key}"] = value
         rows.append(row)
@@ -284,6 +293,7 @@ def extract_approval_history(
         # Execute via REST API (subqueries not supported by Bulk API)
         records = []
         for record in sf.query_all_iter(soql):
+            _strip_attributes([record])
             records.extend(_flatten_pi_record(record, pi_select, node_select))
 
         result.api_used = "rest"
@@ -349,6 +359,8 @@ def extract_object(
                 )
                 records = _extract_rest(sf, soql)
                 result.api_used = "rest"
+
+        _strip_attributes(records)
 
         # Flatten nested dicts from REST API (no-op for Bulk API flat records)
         relationship_fields = [f for f in fields if '.' in f]

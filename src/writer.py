@@ -17,21 +17,15 @@ def write_csv(records: list[dict], object_name: str, output_dir: Path) -> Path:
         logger.warning("No records to write for %s", object_name)
         return output_dir / f"{object_name}.csv"
 
-    # Remove SF metadata and flatten OrderedDict → dict
-    cleaned = []
-    for record in records:
-        row = {k: v for k, v in record.items() if k != "attributes"}
-        cleaned.append(row)
-
     output_dir.mkdir(parents=True, exist_ok=True)
     filepath = output_dir / f"{object_name}.csv"
 
-    fieldnames = list(cleaned[0].keys())
+    fieldnames = list(dict.fromkeys(k for record in records for k in record))
 
     with open(filepath, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=fieldnames, restval="")
         writer.writeheader()
-        writer.writerows(cleaned)
+        writer.writerows(records)
 
-    logger.info("Wrote %d records to %s", len(cleaned), filepath)
+    logger.info("Wrote %d records to %s", len(records), filepath)
     return filepath
