@@ -3,8 +3,10 @@
 import csv
 import io
 import logging
+import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from simple_salesforce import Salesforce
 from simple_salesforce.exceptions import SalesforceError
@@ -97,6 +99,19 @@ def _extract_bulk(sf: Salesforce, object_name: str, soql: str) -> list[dict]:
         raise ValueError(f"Unexpected Bulk API response type: {type(results)}")
 
     return records
+
+
+_SF_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{4}$")
+
+
+def _validate_sf_datetime(value: str) -> None:
+    """Validate a Salesforce datetime string format and semantic correctness."""
+    if not _SF_DATETIME_RE.match(value):
+        raise ValueError(f"Invalid Salesforce datetime format: {value!r}")
+    try:
+        datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%f%z")
+    except ValueError:
+        raise ValueError(f"Semantically invalid datetime: {value!r}")
 
 
 def _extract_rest(sf: Salesforce, soql: str) -> list[dict]:
@@ -338,6 +353,7 @@ def extract_object(
 
         where = None
         if incremental_since:
+            _validate_sf_datetime(incremental_since)
             where = f"LastModifiedDate > {incremental_since}"
 
         soql = _build_soql(obj_config.name, fields, where, limit=limit)
